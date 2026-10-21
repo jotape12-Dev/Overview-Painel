@@ -37,6 +37,7 @@ import argparse
 import http.server
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -60,27 +61,84 @@ NOME_DA_FERRAMENTA = {"claude": "Claude Code", "codex": "Codex", "agy": "Antigra
 
 # ---------------------------------------------------------------- telas
 
+def descobrir_socket_maestri():
+    """Descobre o socket ativo do Maestri se MAESTRI_SOCKET não existir ou não estiver definido."""
+    sock = os.environ.get("MAESTRI_SOCKET")
+    if sock and os.path.exists(sock):
+        return sock
+    import glob
+    import tempfile
+    candidatos = glob.glob(f"{tempfile.gettempdir()}/maestri-*/maestri.sock") + glob.glob("/tmp/maestri-*/maestri.sock")
+    existentes = [c for c in candidatos if os.path.exists(c)]
+    if existentes:
+        mais_recente = max(existentes, key=os.path.getmtime)
+        os.environ["MAESTRI_SOCKET"] = mais_recente
+        return mais_recente
+    return None
+
+
+def tela_do_scrollback(nome):
+    """Fallback para ler a tela diretamente do scrollback do workspace do Maestri."""
+    try:
+        import glob
+        for ws in glob.glob(os.path.expanduser("~/.maestri/workspaces/*")):
+            ws_file = os.path.join(ws, "workspace.json")
+            if not os.path.exists(ws_file):
+                continue
+            with open(ws_file, encoding="utf-8") as f:
+                data = json.load(f)
+            p = data.get("payload", {})
+            for node in p.get("nodes", []):
+                t = node.get("content", {}).get("terminal", {}).get("_0")
+                if t and t.get("name") == nome:
+                    sbf = t.get("scrollbackFile")
+                    if sbf:
+                        sb_path = os.path.join(ws, "terminals", sbf)
+                        if os.path.exists(sb_path):
+                            with open(sb_path, encoding="utf-8") as sbf_file:
+                                lines = json.load(sbf_file)
+                            return "\n".join(item.get("text", "") for item in lines), None
+    except Exception as erro:
+        return None, "scrollback inacessível: %s" % erro
+    return None, "terminal não encontrado nos workspaces do Maestri"
+
+
 def tela_do_maestri(nome):
     """(texto, None) ou (None, motivo)."""
+    descobrir_socket_maestri()
+    if not shutil.which("maestri") and os.environ.get("MAESTRI_CLI"):
+        cli_dir = os.path.dirname(os.environ["MAESTRI_CLI"])
+        if cli_dir and cli_dir not in os.environ.get("PATH", "").split(os.pathsep):
+            os.environ["PATH"] = cli_dir + os.pathsep + os.environ.get("PATH", "")
+
+    motivo_check = None
     try:
         p = subprocess.run(["maestri", "check", nome], stdin=subprocess.DEVNULL,
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=ESPERA_MAESTRI)
+        saida = p.stdout.decode("utf-8", "replace")
+        if p.returncode == 0:
+            return saida, None
+        if saida.startswith("maestri: No connection"):
+            motivo_check = "sem conexão com este terminal"
+        elif saida.startswith("maestri: Terminal") and "not found" in saida:
+            motivo_check = "terminal não encontrado no canvas"
+        else:
+            linhas = saida.strip().splitlines()
+            motivo_check = "maestri check falhou (saída %d): %s" % (
+                p.returncode, leitor.mascarar(linhas[0][:120]) if linhas else "sem mensagem")
     except FileNotFoundError:
-        return None, "maestri não está no PATH"
+        motivo_check = "maestri não está no PATH"
     except subprocess.TimeoutExpired:
-        return None, "maestri check não respondeu em %d s" % ESPERA_MAESTRI
+        motivo_check = "maestri check não respondeu em %d s" % ESPERA_MAESTRI
     except OSError as erro:
-        return None, "maestri check não rodou: %s" % erro
-    saida = p.stdout.decode("utf-8", "replace")
-    if saida.startswith("maestri: No connection"):
-        return None, "sem conexão com este terminal"
-    if saida.startswith("maestri: Terminal") and "not found" in saida:
-        return None, "terminal não encontrado no canvas"
-    if p.returncode != 0:
-        linhas = saida.strip().splitlines()
-        return None, "maestri check falhou (saída %d): %s" % (
-            p.returncode, leitor.mascarar(linhas[0][:120]) if linhas else "sem mensagem")
-    return saida, None
+        motivo_check = "maestri check não rodou: %s" % erro
+
+    # Se o maestri check não conseguir (ex.: falta de corda direta no canvas ou lendo a si mesmo), tenta scrollback
+    texto_sb, motivo_sb = tela_do_scrollback(nome)
+    if texto_sb is not None:
+        return texto_sb, None
+
+    return None, motivo_check or motivo_sb
 
 
 def tela_de_arquivo(pasta, nome):

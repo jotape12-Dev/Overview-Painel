@@ -43,6 +43,19 @@ encerrar() {
 }
 trap encerrar INT TERM HUP
 
+if [ -z "${MAESTRI_SOCKET:-}" ] || [ ! -S "$MAESTRI_SOCKET" ]; then
+  for s in "${TMPDIR:-/tmp}"/maestri-*/maestri.sock /tmp/maestri-*/maestri.sock; do
+    if [ -S "$s" ]; then
+      export MAESTRI_SOCKET="$s"
+      break
+    fi
+  done
+fi
+
+if ! command -v maestri >/dev/null 2>&1 && [ -n "${MAESTRI_CLI:-}" ] && [ -x "$MAESTRI_CLI" ]; then
+  export PATH="$(dirname "$MAESTRI_CLI"):$PATH"
+fi
+
 command -v maestri >/dev/null 2>&1 || echo "painel.sh: aviso: maestri não está no PATH; todos vão aparecer como \"sem leitura\"." >&2
 
 echo "Painel dos Vingadores no ar."

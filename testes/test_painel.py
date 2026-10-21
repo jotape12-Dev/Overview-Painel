@@ -6,6 +6,9 @@ Rodar:  python3 -m unittest discover -s testes -v      (na pasta do painel)
 Nada aqui toca o quadro.json nem o publico/ de verdade: tudo vai para uma pasta temporária.
 Nenhum teste usa rede: o coletor roda com --sem-gh.
 """
+import os
+os.environ["PAINEL_SO_EXEMPLO"] = "1"   # o teste usa o exemplo, não o agents.json de quem roda
+
 import json
 import os
 import subprocess

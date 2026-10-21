@@ -9,6 +9,9 @@ Code nem de Antigravity trabalhando. As do comando digitado e dos menus (`codex-
 `codex-status-digitado-*`, `codex-menu-de-*`, `claude-so-a-barra`, `claude-usage-digitado`) são
 reais, do Codex 0.160.0 e do Claude Code 2.1.287, tiradas em 02/10/2026 de um terminal isolado.
 """
+import os
+os.environ["PAINEL_SO_EXEMPLO"] = "1"   # o teste usa o exemplo, não o agents.json de quem roda
+
 import sys
 import unittest
 from pathlib import Path
@@ -335,3 +338,31 @@ class SegundoPlano(unittest.TestCase):
             "  GPT-6.1-Sol high · Context 35% used · 5h 68% left · weekly 75% left · Waiting · ~/x\n"
         )
         self.assertEqual(leitor.ler_tela(tela, "codex")["estado"], "trabalhando")
+
+
+class StatusDoTimeFrila(unittest.TestCase):
+    """A status line própria do time (Claude Code e agy) é traduzida para a canônica."""
+
+    def test_claude_com_context_usage_weekly(self):
+        tela = ("⏺ pronto.\n\n✻ Brewed for 4s · done 5:20 PM\n"
+                "──────────────────────────────\n❯ \n──────────────────────────────\n"
+                "  [Sonnet 5.5] │ 1c21a40f git:(main*)\n  Context █░░░░░ 15%\n"
+                "  Usage █░░░░░ 16% (resets in 40m) | Weekly ░░░░░░ 2% (resets in 6d 6h)\n")
+        r = leitor.ler_tela(tela, "claude")
+        self.assertEqual((r["leitura"], r["modelo"], r["contexto_pct"], r["sessao_5h_pct"], r["semanal_pct"]),
+                         ("ok", "Sonnet 5.5", 15, 16, 2))
+
+    def test_agy_converte_restante_em_usado(self):
+        tela = ("● Ran (ls)\n\n──────────────────────────────\n>\n──────────────────────────────\n"
+                "? for shortcuts\n"
+                "[Gemini 3.8 Flash (Medium)] Uso restante (5h): ██████░░░░ 58% (reseta em 1h57m) │ Semanal: ██████░░ 76% │ Claude 5h: 100%\n"
+                "Contexto: █████████░ 86% livre (14% usado de 1.0M)\n")
+        r = leitor.ler_tela(tela, "agy")
+        self.assertEqual((r["leitura"], r["contexto_pct"], r["sessao_5h_pct"], r["semanal_pct"], r["estado"]),
+                         ("ok", 14, 42, 24, "ocioso"))
+        self.assertEqual(r["grupo_cota"], "Gemini")
+
+    def test_agy_so_com_rodape(self):
+        tela = "● Ran (ls)\n\n──────────────────────────────\n>\n──────────────────────────────\n? for shortcuts      Gemini 3.8 Flash · high\n"
+        r = leitor.ler_tela(tela, "agy")
+        self.assertEqual((r["leitura"], r["sessao_5h_pct"], r["modelo"]), ("ok", None, "Gemini 3.8 Flash (High)"))

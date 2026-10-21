@@ -8,6 +8,9 @@ comando digitado e dos menus, em testes/telas/, também: Codex 0.160.0 e Claude 
 tiradas em 02/10/2026 de um terminal isolado. A sonda é testada com um `maestri` falso: nenhum
 teste manda tecla a terminal de verdade.
 """
+import os
+os.environ["PAINEL_SO_EXEMPLO"] = "1"   # o teste usa o exemplo, não o agents.json de quem roda
+
 import json
 import os
 import shutil

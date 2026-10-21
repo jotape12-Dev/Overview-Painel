@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 RAIZ = Path(__file__).resolve().parent.parent
+ARQ_AGENTS = RAIZ / "agents.json"                              # o time de quem usa o painel; vale antes do vingadores.json
 ARQ_VINGADORES = RAIZ / "vingadores.json"
 ARQ_VINGADORES_EXEMPLO = RAIZ / "vingadores.exemplo.json"     # vale enquanto não existir o vingadores.json
 PASTA_PUBLICA = RAIZ / "publico"
@@ -70,9 +71,12 @@ def slug(nome):
 def carregar_mapa(caminho=None):
     """O mapa dos Vingadores (vingadores.json), na ordem do VINGADORES.md."""
     if caminho is None:
-        caminho = ARQ_VINGADORES if ARQ_VINGADORES.exists() else ARQ_VINGADORES_EXEMPLO
+        procurados = (ARQ_AGENTS, ARQ_VINGADORES) if not os.environ.get("PAINEL_SO_EXEMPLO") else ()
+        caminho = next((c for c in procurados if c.exists()), ARQ_VINGADORES_EXEMPLO)
     with open(caminho, encoding="utf-8") as f:
         mapa = json.load(f)
+    if "vingadores" not in mapa and "agents" in mapa:    # agents.json usa a chave "agents"
+        mapa["vingadores"] = mapa["agents"]
     for v in mapa["vingadores"]:
         v["nome"] = unicodedata.normalize("NFC", v["nome"])
     return mapa

@@ -105,7 +105,7 @@ LANCADOR = "agy.sh"
 FILTRO_DO_EMAIL = '/OAuth: authenticated successfully as / { print substr($0, index($0, "OAuth:")) }'
 
 
-def consultar_casa(casa, espera=40):
+def consultar_casa(casa, espera=60):
     """A cota da conta de uma casa do Antigravity, pelo lançador dela (`<casa>/agy.sh -p /quota`).
 
     Cada conta do Antigravity roda numa casa própria (HOME e Keychain separados); o lançador da casa
@@ -221,23 +221,51 @@ class CasasDoAntigravity:
         self.trava = threading.Lock()
         self.fio = None
 
-    def _rodar(self, pendentes):
+    def _consultar(self, casa):
+        """(erro, resultado) de uma casa, sem decidir ainda se o e-mail é o esperado."""
+        try:
+            resultado = self.consultar(casa)
+            return ("sem lançador" if resultado is None else None), resultado
+        except TimeoutError:
+            return "timeout", None
+        except subprocess.CalledProcessError as falha:
+            return "exit %d" % falha.returncode, None
+        except (ValueError, KeyError, TypeError):
+            return "parse", None
+        except Exception:       # uma casa com problema não impede as outras
+            return "query", None
+
+    def _rodar(self, pendentes, outras_casas=()):
+        # Primeiro consulta todas as casas; depois cada conta pega a leitura cujo e-mail é o dela. O terminal pode
+        # estar logado numa conta diferente da que a casa guarda hoje (login feito antes de uma correção de casa):
+        # o número só vale para a conta de quem ele é, venha de qual casa vier.
+        lidas = {casa: self._consultar(casa) for casa, _ in pendentes}
+        por_email = {}
+        for erro, resultado in lidas.values():
+            if resultado is not None and not erro:
+                por_email.setdefault(backend.normalize_email(resultado.get("email")), resultado)
         for casa, email_esperado in pendentes:
-            erro, resultado = None, None
-            try:
-                resultado = self.consultar(casa)
-                if resultado is None:
-                    erro = "sem lançador"
-                elif backend.normalize_email(resultado.get("email")) != email_esperado:
-                    erro, resultado = "conta diferente", None
-            except TimeoutError:
-                erro = "timeout"
-            except subprocess.CalledProcessError as falha:
-                erro = "exit %d" % falha.returncode
-            except (ValueError, KeyError, TypeError):
-                erro = "parse"
-            except Exception:       # uma casa com problema não impede as outras
-                erro = "query"
+            erro, resultado = lidas[casa]
+            if resultado is not None and not erro and backend.normalize_email(resultado.get("email")) == email_esperado:
+                pass
+            else:
+                # Sem lançador na casa, ou a casa guarda outra conta (login feito antes de uma correção de casa, casa
+                # legada): o número só vale para a conta de quem ele é, venha de qual casa vier.
+                resultado = por_email.get(email_esperado)
+                for outra in outras_casas:
+                    if resultado is not None:
+                        break
+                    if outra not in lidas:
+                        lidas[outra] = self._consultar(outra)
+                    e2, r2 = lidas[outra]
+                    if r2 is not None and not e2:
+                        por_email.setdefault(backend.normalize_email(r2.get("email")), r2)
+                        if backend.normalize_email(r2.get("email")) == email_esperado:
+                            resultado = r2
+                if resultado is not None:
+                    erro = None
+                elif not erro or erro == "sem lançador":
+                    erro = "conta diferente" if lidas[casa][1] is not None else "sem lançador"
             agora = time.time()
             with self.trava:
                 e = self.estado.setdefault(casa, {"falhas": 0})
@@ -267,7 +295,9 @@ class CasasDoAntigravity:
                     pendentes.append((conta.account_dir, email))
         if not pendentes:
             return
-        self.fio = threading.Thread(target=self._rodar, args=(pendentes,), daemon=True)
+        todas = sorted({c.account_dir for c in contas if getattr(c, "account_dir", None)}
+                       | {str(h) for h in (Path.home() / ".agy-contas").glob("conta*/home") if (h / LANCADOR).is_file()})
+        self.fio = threading.Thread(target=self._rodar, args=(pendentes, todas), daemon=True)
         self.fio.start()
         if esperar:
             self.fio.join()

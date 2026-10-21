@@ -5,6 +5,7 @@ quadro.json
 quadro.json.trava
 estado.json
 vingadores.json
+agents.json
 sonda.desligada
 *.pid
 .painel.pid

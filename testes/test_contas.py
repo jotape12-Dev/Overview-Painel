@@ -5,6 +5,9 @@ estado das contas é montado à mão, no formato de GET /api/state do original (
 
 Rodar:  python3 -m unittest discover -s testes -v      (na pasta do painel)
 """
+import os
+os.environ["PAINEL_SO_EXEMPLO"] = "1"   # o teste usa o exemplo, não o agents.json de quem roda
+
 import sys
 import time
 import unittest
